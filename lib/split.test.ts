@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { allocate, computeSplit, SplitError } from "./split";
-import { computeBalances, simplifyDebts } from "./balances";
+import { computeBalances, explainBalance, simplifyDebts } from "./balances";
 import { toPaise, formatMoney } from "./money";
 import type { Expense, TripState } from "./types";
 
@@ -129,6 +129,30 @@ describe("balances", () => {
     ]);
     expect(many.length).toBeLessThanOrEqual(4);
     expect(many.reduce((x, m) => x + m.amount, 0)).toBe(1000);
+  });
+});
+
+describe("explainBalance", () => {
+  it("lines add up to each person's net, including kitty and payments", () => {
+    const k = (p: string) => ({ id: "k" + p, participantId: p, amount: 200000, mode: "upi" as const, note: "", paidOn: "2026-10-15", createdAt: "", deletedAt: null });
+    const s = state({
+      trip: { id: "t", name: "T", startDate: null, endDate: null, budgetTotal: null, kittyHolderId: "a", createdAt: "" },
+      kitty: [k("a"), k("b"), k("c")],
+      expenses: [
+        exp({ amount: 450000, fromKitty: true, payers: [], splits: ["a", "b", "c"].map((p) => ({ participantId: p, amount: 150000 })) }),
+        exp({ amount: 900, payers: [{ participantId: "a", amount: 500 }, { participantId: "b", amount: 400 }], splits: [{ participantId: "b", amount: 450 }, { participantId: "c", amount: 450 }] }),
+        exp({ amount: 7000, deletedAt: "x", payers: [{ participantId: "c", amount: 7000 }], splits: [{ participantId: "a", amount: 7000 }] }),
+      ],
+      settlements: [{ id: "s", fromId: "c", toId: "a", amount: 300, mode: "upi", note: "", paidOn: "2026-10-16", createdBy: null, createdAt: "", deletedAt: null }],
+    });
+    for (const b of computeBalances(s)) {
+      const lines = explainBalance(s, b.participantId, (id) => id, String);
+      expect(lines.reduce((x, l) => x + l.effect, 0)).toBe(b.net);
+    }
+    const a = explainBalance(s, "a", (id) => id, String);
+    expect(a.find((l) => l.kind === "kittyHeld")?.effect).toBe(-150000);
+    expect(a.some((l) => l.detail.includes("not part of the split"))).toBe(true);
+    expect(explainBalance(s, "c", (id) => id, String).some((l) => l.detail === "Share 450, paid by a and b")).toBe(true);
   });
 });
 
