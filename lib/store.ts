@@ -3,7 +3,7 @@ import { customAlphabet } from "nanoid";
 import type { PoolClient } from "pg";
 import { z } from "zod";
 import { query, transaction } from "./db";
-import { CATEGORY_IDS, categoryOf, modeLabel, splitLabel } from "./constants";
+import { CATEGORY_IDS, categoryOf, MAX_TICKET_BYTES, modeLabel, splitLabel, TICKET_CHUNK, TICKET_KIND_IDS, ticketParts } from "./constants";
 import { formatMoney } from "./money";
 import { computeSplit, seedFrom, SplitError } from "./split";
 import type { ActivityEntry, Expense, KittyContribution, Line, Participant, Settlement, SplitInput, Ticket, Trip, TripState } from "./types";
@@ -49,6 +49,8 @@ const expenseSchema = z.object({
 });
 
 const ticketMeta = z.object({
+  kind: z.string().refine((k) => TICKET_KIND_IDS.includes(k), "Pick a ticket type").default("bus"),
+  title: z.string().trim().max(60).default(""),
   fromPlace: z.string().trim().max(40).default(""),
   toPlace: z.string().trim().max(40).default(""),
   departsOn: date.nullable().default(null),
@@ -59,7 +61,6 @@ const ticketMeta = z.object({
   passengersText: z.string().trim().max(400).default(""),
   note: z.string().trim().max(300).default(""),
 });
-export const MAX_TICKET_BYTES = 3 * 1024 * 1024; // Vercel caps a request at 4.5 MB, and base64 adds a third
 
 export const createTripSchema = z.object({
   name: z.string().trim().min(1, "Give the trip a name").max(60),
@@ -83,7 +84,15 @@ const actions = {
   "kitty.setHolder": z.object({ participantId: z.string() }),
   "kitty.contribute": z.object({ participantId: z.string(), amount: money, mode, note: z.string().trim().max(200).default(""), paidOn: date }),
   "kitty.remove": z.object({ id: z.string() }),
-  "ticket.add": ticketMeta.extend({ filename: z.string().trim().min(1).max(120), file: z.string().min(20).max(4_300_000, "That file is too large. Tickets can be up to 3 MB.") }),
+  // Adding a ticket takes three steps: "ticket.add" reserves it, the file route receives the
+  // pieces, and "ticket.finish" checks them and makes the ticket visible.
+  "ticket.add": ticketMeta.extend({
+    id: z.string().uuid(),
+    filename: z.string().trim().min(1).max(120),
+    mime: z.enum(["application/pdf", "image/jpeg", "image/png", "image/webp"], "Tickets need to be a PDF or a photo (JPG or PNG)"),
+    size: z.number().int().positive().max(MAX_TICKET_BYTES, "That file is too large. Tickets can be up to 20 MB."),
+  }),
+  "ticket.finish": z.object({ id: z.string() }),
   "ticket.update": ticketMeta.extend({ id: z.string() }),
   "ticket.delete": z.object({ id: z.string() }),
   "budget.set": z.object({ category: z.string(), amount: z.number().int().min(0).max(1_000_000_000) }), // category "total" sets the trip budget; 0 clears
@@ -109,8 +118,8 @@ export async function getState(id: string): Promise<TripState | null> {
     query<any>("select * from activity where trip_id = $1 order by id desc limit 400", [id]),
     // Everything except the file bytes, which are served by the ticket route.
     query<any>(
-      `select id, from_place, to_place, departs_on, departs_at, operator, reference, passenger_ids, passengers_text, note, filename, mime, size, uploaded_by, created_at
-       from tickets where trip_id = $1 and deleted_at is null order by departs_on nulls last, departs_at nulls last, created_at`,
+      `select id, kind, title, from_place, to_place, departs_on, departs_at, operator, reference, passenger_ids, passengers_text, note, filename, mime, size, uploaded_by, created_at
+       from tickets where trip_id = $1 and deleted_at is null and complete order by departs_on nulls last, departs_at nulls last, created_at`,
       [id],
     ),
   ]);
@@ -143,7 +152,7 @@ export async function getState(id: string): Promise<TripState | null> {
       id: Number(a.id), actorId: a.actor_id, action: a.action, entityType: a.entity_type, entityId: a.entity_id, summary: a.summary, changes: a.changes ?? [], createdAt: iso(a.created_at)!,
     })),
     tickets: tickets.map((t): Ticket => ({
-      id: t.id, fromPlace: t.from_place, toPlace: t.to_place, departsOn: t.departs_on, departsAt: t.departs_at, operator: t.operator, reference: t.reference,
+      id: t.id, kind: t.kind, title: t.title, fromPlace: t.from_place, toPlace: t.to_place, departsOn: t.departs_on, departsAt: t.departs_at, operator: t.operator, reference: t.reference,
       passengerIds: (t.passenger_ids as string[]).filter((p) => participants.some((x) => x.id === p)), passengersText: t.passengers_text, note: t.note,
       filename: t.filename, mime: t.mime, size: t.size, uploadedBy: t.uploaded_by, createdAt: iso(t.created_at)!,
     })),
@@ -155,9 +164,38 @@ export async function getReceipt(trip: string, id: string): Promise<{ mime: stri
   return rows[0] ?? null;
 }
 
-export async function getTicketFile(trip: string, id: string): Promise<{ mime: string; filename: string; data: Buffer } | null> {
-  const rows = await query<{ mime: string; filename: string; data: Buffer }>("select mime, filename, data from tickets where id = $1 and trip_id = $2 and deleted_at is null", [id, trip]);
-  return rows[0] ?? null;
+export interface TicketFile {
+  mime: string;
+  filename: string;
+  size: number;
+  parts: number;
+}
+
+export async function getTicketInfo(trip: string, id: string): Promise<TicketFile | null> {
+  const rows = await query<{ mime: string; filename: string; size: number }>("select mime, filename, size from tickets where id = $1 and trip_id = $2 and deleted_at is null and complete", [id, trip]);
+  return rows[0] ? { ...rows[0], parts: ticketParts(rows[0].size) } : null;
+}
+
+/** One piece of a ticket file. Tickets saved before files were split keep their bytes on the ticket row itself. */
+export async function getTicketPart(id: string, part: number): Promise<Buffer | null> {
+  const chunk = await query<{ data: Buffer }>("select data from ticket_chunks where ticket_id = $1 and seq = $2", [id, part]);
+  if (chunk[0]) return chunk[0].data;
+  if (part !== 0) return null;
+  const whole = await query<{ data: Buffer }>("select data from tickets where id = $1 and length(data) > 0", [id]);
+  return whole[0]?.data ?? null;
+}
+
+/** Stores one uploaded piece of a ticket that "ticket.add" has reserved. */
+export async function putTicketChunk(trip: string, id: string, seq: number, data: Buffer): Promise<void> {
+  const rows = await query<{ size: number; complete: boolean }>("select size, complete from tickets where id = $1 and trip_id = $2 and deleted_at is null", [id, trip]);
+  const t = rows[0];
+  if (!t) throw new UserError("That ticket no longer exists", 404);
+  if (t.complete) throw new UserError("That ticket is already saved");
+  const parts = ticketParts(t.size);
+  if (!Number.isInteger(seq) || seq < 0 || seq >= parts) throw new UserError("Unexpected part of the file");
+  const expected = seq === parts - 1 ? t.size - TICKET_CHUNK * (parts - 1) : TICKET_CHUNK;
+  if (data.length !== expected) throw new UserError("Part of the file didn't arrive whole. Try again.");
+  await query("insert into ticket_chunks (ticket_id, seq, data) values ($1,$2,$3) on conflict (ticket_id, seq) do update set data = excluded.data", [id, seq, data]);
 }
 
 // ---------- writes ----------
@@ -247,7 +285,12 @@ async function writeLines(ctx: Ctx, id: string, payers: Line[], splits: Line[]) 
   for (const s of splits) await ctx.c.query("insert into expense_splits values ($1,$2,$3)", [id, s.participantId, s.amount]);
 }
 
-const ticketName = (t: { fromPlace: string; toPlace: string }) => (t.fromPlace && t.toPlace ? ` from ${t.fromPlace} to ${t.toPlace}` : "");
+/** "bus ticket for Tirupur to Chennai" or "entry pass for Wonderla", for the history log. */
+function ticketName(t: { kind: string; title: string; fromPlace: string; toPlace: string }): string {
+  const noun: Record<string, string> = { bus: "bus ticket", train: "train ticket", flight: "flight ticket", entry: "entry pass", stay: "stay booking" };
+  const what = t.fromPlace && t.toPlace ? `${t.fromPlace} to ${t.toPlace}` : t.title || t.fromPlace || t.toPlace;
+  return `${noun[t.kind] ?? "ticket"}${what ? ` for ${what}` : ""}`;
+}
 const describePayers = (ctx: Ctx, fromKitty: boolean, payers: Line[]) =>
   fromKitty ? "the kitty" : payers.map((p) => (payers.length > 1 ? `${who(ctx, p.participantId)} ${formatMoney(p.amount)}` : who(ctx, p.participantId))).join(", ");
 const describeSplit = (ctx: Ctx, splits: Line[]) => splits.map((s) => `${who(ctx, s.participantId)} ${formatMoney(s.amount)}`).join(", ");
@@ -413,37 +456,51 @@ export async function applyAction(trip: string, action: string, actorId: string 
         break;
       }
       case "ticket.add": {
-        const m = /^data:(application\/pdf|image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(data.file);
-        if (!m) throw new UserError("Tickets need to be a PDF or a photo (JPG or PNG)");
-        const bytes = Buffer.from(m[2], "base64");
-        if (bytes.length > MAX_TICKET_BYTES) throw new UserError("That file is too large. Tickets can be up to 3 MB.");
-        if (m[1] === "application/pdf" && bytes.subarray(0, 5).toString("latin1") !== "%PDF-") throw new UserError("That file isn't a valid PDF");
         data.passengerIds.forEach((p: string) => need(ctx, p));
-        const id = randomUUID();
+        // Clear out uploads that were started and never finished.
+        await c.query("delete from tickets where trip_id = $1 and not complete and created_at < now() - interval '1 hour'", [trip]);
         await c.query(
-          `insert into tickets (id, trip_id, from_place, to_place, departs_on, departs_at, operator, reference, passenger_ids, passengers_text, note, filename, mime, size, data, uploaded_by)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
-          [id, trip, data.fromPlace, data.toPlace, data.departsOn, data.departsAt, data.operator, data.reference, JSON.stringify([...new Set(data.passengerIds)]), data.passengersText, data.note, data.filename, m[1], bytes.length, bytes, ctx.actor],
+          `insert into tickets (id, trip_id, kind, title, from_place, to_place, departs_on, departs_at, operator, reference, passenger_ids, passengers_text, note, filename, mime, size, data, uploaded_by, complete)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,''::bytea,$17,false)`,
+          [data.id, trip, data.kind, data.title, data.fromPlace, data.toPlace, data.departsOn, data.departsAt, data.operator, data.reference, JSON.stringify([...new Set(data.passengerIds)]), data.passengersText, data.note, data.filename, data.mime, data.size, ctx.actor],
         );
-        await say("ticket", id, `Added a ticket${ticketName(data)}${data.passengerIds.length ? ` for ${data.passengerIds.map((p: string) => who(ctx, p)).join(", ")}` : ""}`);
+        break;
+      }
+      case "ticket.finish": {
+        const tk = await owned("tickets", data.id);
+        if (tk.deleted_at) throw new UserError("That ticket was deleted", 404);
+        if (tk.complete) break;
+        const got = (await c.query("select count(*)::int as n, coalesce(sum(length(data)), 0)::int as bytes, max(seq) as last from ticket_chunks where ticket_id = $1", [data.id])).rows[0];
+        if (got.n !== ticketParts(tk.size) || got.bytes !== tk.size || got.last !== got.n - 1) throw new UserError("The file didn't upload completely. Try adding it again.");
+        if (tk.mime === "application/pdf") {
+          const head = (await c.query("select substring(data from 1 for 5) as head from ticket_chunks where ticket_id = $1 and seq = 0", [data.id])).rows[0].head as Buffer;
+          if (head.toString("latin1") !== "%PDF-") {
+            await c.query("delete from tickets where id = $1", [data.id]);
+            throw new UserError("That file isn't a valid PDF");
+          }
+        }
+        await c.query("update tickets set complete = true where id = $1", [data.id]);
+        const ids = tk.passenger_ids as string[];
+        await say("ticket", data.id, `Added the ${ticketName({ kind: tk.kind, title: tk.title, fromPlace: tk.from_place, toPlace: tk.to_place })}${ids.length ? `, for ${ids.map((p) => who(ctx, p)).join(", ")}` : ""}`);
         break;
       }
       case "ticket.update": {
         if ((await owned("tickets", data.id)).deleted_at) throw new UserError("That ticket was deleted", 404);
         data.passengerIds.forEach((p: string) => need(ctx, p));
         await c.query(
-          `update tickets set from_place=$2, to_place=$3, departs_on=$4, departs_at=$5, operator=$6, reference=$7, passenger_ids=$8, passengers_text=$9, note=$10 where id=$1`,
-          [data.id, data.fromPlace, data.toPlace, data.departsOn, data.departsAt, data.operator, data.reference, JSON.stringify([...new Set(data.passengerIds)]), data.passengersText, data.note],
+          `update tickets set kind=$11, title=$12, from_place=$2, to_place=$3, departs_on=$4, departs_at=$5, operator=$6, reference=$7, passenger_ids=$8, passengers_text=$9, note=$10 where id=$1`,
+          [data.id, data.fromPlace, data.toPlace, data.departsOn, data.departsAt, data.operator, data.reference, JSON.stringify([...new Set(data.passengerIds)]), data.passengersText, data.note, data.kind, data.title],
         );
-        await say("ticket", data.id, `Edited the ticket${ticketName(data)}`);
+        await say("ticket", data.id, `Edited the ${ticketName(data)}`);
         break;
       }
       case "ticket.delete": {
         const old = await owned("tickets", data.id);
         if (old.deleted_at) break;
         // The file is removed for real; only the row stays so the history still makes sense.
-        await c.query("update tickets set deleted_at = now(), data = ''::bytea, size = 0 where id = $1", [data.id]);
-        await say("ticket", data.id, `Deleted the ticket${ticketName({ fromPlace: old.from_place, toPlace: old.to_place })}`);
+        await c.query("delete from ticket_chunks where ticket_id = $1", [data.id]);
+        await c.query("update tickets set deleted_at = now(), data = ''::bytea where id = $1", [data.id]);
+        await say("ticket", data.id, `Deleted the ${ticketName({ kind: old.kind, title: old.title, fromPlace: old.from_place, toPlace: old.to_place })}`);
         break;
       }
       case "budget.set": {

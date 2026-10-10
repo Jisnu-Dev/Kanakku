@@ -15,6 +15,7 @@ const paths: Record<string, ReactNode> = {
   chart: <path d="M5 20V10M12 20V4M19 20v-7" />,
   people: <path d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM2.5 20a6.5 6.5 0 0 1 13 0M16 4.3a3.5 3.5 0 0 1 0 6.4M18 14.5a6.5 6.5 0 0 1 3.5 5.5" />,
   plus: <path d="M12 5v14M5 12h14" />,
+  minus: <path d="M5 12h14" />,
   x: <path d="M6 6l12 12M18 6 6 18" />,
   check: <path d="m5 12.5 4.5 4.5L19 7.5" />,
   chevron: <path d="m9 6 6 6-6 6" />,

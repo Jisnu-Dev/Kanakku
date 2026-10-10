@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchPeople, namesFromFilename, parseTicketText } from "./ticketParse";
+import { looseDate, matchPeople, namesFromFilename, parseTicketText } from "./ticketParse";
 
 // Shapes taken from real redBus e-tickets (bold text comes through doubled).
 const group = `Ticket Ticket Information Information Tirupur-Chennai Tirupur-Chennai on on Saturday, October Saturday, October 17, 2026 17, 2026
@@ -41,7 +41,25 @@ describe("parseTicketText", () => {
     expect(JSON.stringify(parseTicketText(group))).not.toMatch(/Yrs|MALE|15/);
   });
   it("returns empty fields for text it doesn't recognise", () => {
-    expect(parseTicketText("Boarding pass. Gate 4.")).toEqual({ fromPlace: "", toPlace: "", departsOn: null, departsAt: null, reference: "", passengers: [] });
+    expect(parseTicketText("Boarding pass. Gate 4.")).toEqual({ kind: null, title: "", fromPlace: "", toPlace: "", departsOn: null, departsAt: null, reference: "", passengers: [] });
+  });
+});
+
+describe("ticket types", () => {
+  it("marks redBus tickets as bus tickets", () => {
+    expect(parseTicketText(group).kind).toBe("bus");
+    expect(parseTicketText(single).kind).toBe("bus");
+  });
+  it("recognises an amusement park pass and only trusts a labelled visit date", () => {
+    const t = parseTicketText("WONDERLA Chennai  E-Ticket  Booking ID: WL-88213  Booked on 02/10/2026  Visit Date: 18 Oct 2026  Adult x 10");
+    expect([t.kind, t.title, t.departsOn, t.departsAt, t.reference]).toEqual(["entry", "Wonderla", "2026-10-18", null, "WL-88213"]);
+    expect(parseTicketText("Wonderla ticket. Booked on 02/10/2026.").departsOn).toBeNull();
+    expect(t.fromPlace).toBe("");
+  });
+  it("reads loose date formats", () => {
+    expect(["17/10/2026", "17-10-2026", "17 Oct 2026", "17th October, 2026", "October 17, 2026", "Sat, 17-Oct-2026"].map(looseDate)).toEqual(Array(6).fill("2026-10-17"));
+    expect(looseDate("no date")).toBeNull();
+    expect(looseDate("45/13/2026")).toBeNull();
   });
 });
 
