@@ -41,7 +41,7 @@ export function useTrip(id: string, onError: (msg: string) => void) {
   const refresh = useCallback(async () => {
     if (writing.current) return;
     try {
-      const res = await fetch(`/api/trips/${id}`, { cache: "no-store" });
+      const res = await fetch(`/api/trips/${id}`, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
       if (res.status === 404) return setStatus("missing");
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error);
       const text = await res.text();
