@@ -60,6 +60,15 @@ export function parseTicketText(raw: string): ParsedTicket {
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
 
+/** True when the two words differ by a single inserted, removed or changed letter. */
+function oneEditApart(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
+  let i = 0;
+  while (i < short.length && short[i] === long[i]) i++;
+  return short.length === long.length ? short.slice(i + 1) === long.slice(i + 1) : short.slice(i) === long.slice(i + 1);
+}
+
 /** Match names from a ticket (or its file name) to people on the trip. Returns the matched ids. */
 export function matchPeople(names: string[], people: { id: string; name: string }[]): string[] {
   const ids = new Set<string>();
@@ -70,7 +79,13 @@ export function matchPeople(names: string[], people: { id: string; name: string 
     // Same first name, or one letter apart at the end ("Jai" / "Jaii"). Anything looser confuses
     // different people who share a start, like Arun and Arunika.
     const close = (a: string, b: string) => a === b || (Math.min(a.length, b.length) >= 3 && Math.abs(a.length - b.length) === 1 && (a.startsWith(b) || b.startsWith(a)));
-    const hit = people.find((p) => norm(p.name) === n) ?? people.find((p) => norm(p.name).split(" ")[0] === first) ?? people.find((p) => close(norm(p.name).split(" ")[0], first));
+    const firstOf = (p: { name: string }) => norm(p.name).split(" ")[0];
+    const hit =
+      people.find((p) => norm(p.name) === n) ??
+      people.find((p) => firstOf(p) === first) ??
+      people.find((p) => close(firstOf(p), first)) ??
+      // Longer names may differ by one typo: "akilesh" on the ticket, "Akhilesh" on the trip.
+      people.find((p) => Math.min(firstOf(p).length, first.length) >= 6 && oneEditApart(firstOf(p), first));
     if (hit) ids.add(hit.id);
   }
   return [...ids];
