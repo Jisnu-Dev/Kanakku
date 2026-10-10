@@ -10,11 +10,12 @@ import { Expenses } from "./Expenses";
 import { Balances } from "./Balances";
 import { Insights } from "./Insights";
 import { Group } from "./Group";
+import { Tickets } from "./Tickets";
 import { ExpenseForm } from "./ExpenseForm";
 import { ExpenseDetail } from "./ExpenseDetail";
 import { KittyForm, SettleForm, type SettlePrefill } from "./MoneyForms";
 
-export type Tab = "home" | "expenses" | "balances" | "insights" | "group";
+export type Tab = "home" | "expenses" | "balances" | "insights" | "tickets" | "group";
 
 interface App {
   state: TripState;
@@ -46,6 +47,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "expenses", label: "Expenses", icon: "list" },
   { id: "balances", label: "Balances", icon: "scale" },
   { id: "insights", label: "Spending", icon: "chart" },
+  { id: "tickets", label: "Tickets", icon: "ticket" },
   { id: "group", label: "Group", icon: "people" },
 ];
 
@@ -116,7 +118,7 @@ export function TripApp({ id }: { id: string }) {
   if (!app) return status === "error" ? <Notice title="Couldn't load the trip" body="Check your connection and reload the page." /> : <Loading />;
 
   const needsIdentity = !app.me || choosing;
-  const View = { home: Home, expenses: Expenses, balances: Balances, insights: Insights, group: Group }[tab];
+  const View = { home: Home, expenses: Expenses, balances: Balances, insights: Insights, tickets: Tickets, group: Group }[tab];
 
   return (
     <Ctx.Provider value={app}>
@@ -125,14 +127,14 @@ export function TripApp({ id }: { id: string }) {
       </div>
 
       <nav aria-label="Sections" className="no-print fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface/95 backdrop-blur">
-        <div className="safe-bottom mx-auto grid max-w-[520px] grid-cols-5 px-1 pt-1.5">
+        <div className="safe-bottom mx-auto grid max-w-[520px] grid-cols-6 px-0.5 pt-1.5">
           {TABS.map((t) => (
             <button
               key={t.id}
               type="button"
               onClick={() => go(t.id)}
               aria-current={tab === t.id ? "page" : undefined}
-              className={cx("flex flex-col items-center gap-0.5 rounded-xl py-1.5 text-[11.5px] font-semibold", tab === t.id ? "text-indigo dark:text-turmeric" : "text-muted")}
+              className={cx("flex flex-col items-center gap-0.5 rounded-xl py-1.5 text-[10.5px] font-semibold min-[400px]:text-[11.5px]", tab === t.id ? "text-indigo dark:text-turmeric" : "text-muted")}
             >
               <Icon name={t.icon} size={22} />
               {t.label}
@@ -141,7 +143,7 @@ export function TripApp({ id }: { id: string }) {
         </div>
       </nav>
 
-      {tab !== "group" && (
+      {tab !== "group" && tab !== "tickets" && (
         <div className="no-print pointer-events-none fixed inset-x-0 bottom-[76px] z-20 mx-auto flex max-w-[520px] justify-end px-4" style={{ marginBottom: "env(safe-area-inset-bottom)" }}>
           <button
             type="button"

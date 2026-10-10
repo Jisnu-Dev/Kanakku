@@ -28,6 +28,8 @@ const paths: Record<string, ReactNode> = {
   undo: <path d="M9 7 4 12l5 5M4 12h10a5 5 0 0 1 0 10h-2" />,
   search: <path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4" />,
   arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
+  ticket: <path d="M4 7h16v3.5a1.5 1.5 0 0 0 0 3V17H4v-3.5a1.5 1.5 0 0 0 0-3zM14.5 7v2M14.5 11v2M14.5 15v2" />,
+  eye: <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
   print: <path d="M7 9V4h10v5M7 17H4v-7h16v7h-3M7 14h10v6H7z" />,
 };
 

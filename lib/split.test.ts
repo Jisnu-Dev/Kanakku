@@ -83,7 +83,7 @@ function state(over: Partial<TripState>): TripState {
   return {
     trip: { id: "t", name: "T", startDate: null, endDate: null, budgetTotal: null, kittyHolderId: null, createdAt: "" },
     participants: ["a", "b", "c"].map((id, i) => ({ id, name: id, color: i, active: true, createdAt: "" })),
-    expenses: [], settlements: [], kitty: [], budgets: {}, activity: [], ...over,
+    expenses: [], settlements: [], kitty: [], budgets: {}, activity: [], tickets: [], ...over,
   };
 }
 const nets = (s: TripState) => Object.fromEntries(computeBalances(s).map((b) => [b.participantId, b.net]));

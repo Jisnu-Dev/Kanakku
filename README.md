@@ -42,6 +42,11 @@ npm test                     # split and balance maths
 - **People**: someone with recorded expenses can't be deleted, only marked as left.
 - **History**: every change is logged with who made it and what changed. Deleted
   expenses can be restored from the Group tab.
+- **Tickets**: PDFs or photos (up to 3 MB each) are stored in Postgres and shown on the
+  Tickets tab with an in-app preview and a download button. For PDFs, the route, date, ticket
+  number and passengers are read from the ticket's own text in the browser (`lib/ticketParse.ts`,
+  written against redBus e-tickets). `public/pdf.worker.min.mjs` is a copy of
+  `node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs`; copy it again if you upgrade pdfjs-dist.
 - **Receipts** are shrunk in the browser (about 150 KB each) and stored in Postgres.
 - **Sync**: the page refetches every 6 seconds and on focus. Saves for one trip are
   serialised with a row lock, so simultaneous edits don't clash.

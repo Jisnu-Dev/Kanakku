@@ -86,6 +86,25 @@ export interface ActivityEntry {
   createdAt: string;
 }
 
+/** A travel ticket file (PDF or photo). The file itself is fetched separately. */
+export interface Ticket {
+  id: string;
+  fromPlace: string;
+  toPlace: string;
+  departsOn: string | null; // YYYY-MM-DD
+  departsAt: string | null; // HH:MM
+  operator: string;
+  reference: string;
+  passengerIds: string[]; // people on the trip who travel on this ticket
+  passengersText: string; // names and seats as printed, e.g. "arunika U5, alex 12"
+  note: string;
+  filename: string;
+  mime: string;
+  size: number;
+  uploadedBy: string | null;
+  createdAt: string;
+}
+
 export interface Trip {
   id: string;
   name: string;
@@ -104,4 +123,5 @@ export interface TripState {
   kitty: KittyContribution[];
   budgets: Record<string, number>; // category -> paise
   activity: ActivityEntry[];
+  tickets: Ticket[];
 }

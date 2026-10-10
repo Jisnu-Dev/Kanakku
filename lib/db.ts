@@ -104,6 +104,27 @@ create table if not exists activity (
   created_at timestamptz not null default now()
 );
 create index if not exists activity_trip on activity(trip_id, id desc);
+create table if not exists tickets (
+  id text primary key,
+  trip_id text not null references trips(id) on delete cascade,
+  from_place text not null default '',
+  to_place text not null default '',
+  departs_on date,
+  departs_at text,
+  operator text not null default '',
+  reference text not null default '',
+  passenger_ids jsonb not null default '[]',
+  passengers_text text not null default '',
+  note text not null default '',
+  filename text not null,
+  mime text not null,
+  size integer not null,
+  data bytea not null,
+  uploaded_by text,
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+create index if not exists tickets_trip on tickets(trip_id);
 `;
 
 const g = globalThis as unknown as { __pool?: Pool; __schema?: Promise<void> };
@@ -140,7 +161,8 @@ async function ready(): Promise<Pool> {
   if (!g.__schema) {
     g.__schema = (async () => {
       // Normal case: the tables already exist, so there is nothing to lock or create.
-      const done = await p.query("select to_regclass('public.activity_trip') is not null as ok");
+      // This checks the newest object in SCHEMA; update it whenever something is added there.
+      const done = await p.query("select to_regclass('public.tickets_trip') is not null as ok");
       if (done.rows[0]?.ok) return;
       const c = await p.connect();
       try {
