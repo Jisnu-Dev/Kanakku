@@ -45,3 +45,23 @@ export const THREADS = [
   { bg: "#8A5A2B", ink: "#FFFFFF" }, // filter coffee
 ];
 export const thread = (i: number) => THREADS[((i % THREADS.length) + THREADS.length) % THREADS.length];
+
+export const TICKET_KINDS = [
+  { id: "bus", label: "Bus", glyph: "🚌", travel: true },
+  { id: "train", label: "Train", glyph: "🚆", travel: true },
+  { id: "flight", label: "Flight", glyph: "✈️", travel: true },
+  { id: "entry", label: "Entry pass", glyph: "🎢", travel: false },
+  { id: "stay", label: "Stay", glyph: "🏨", travel: false },
+  { id: "other", label: "Other", glyph: "📄", travel: false },
+] as const;
+export type TicketKind = (typeof TICKET_KINDS)[number]["id"];
+export const TICKET_KIND_IDS = TICKET_KINDS.map((k) => k.id) as string[];
+export const ticketKind = (id: string) => TICKET_KINDS.find((k) => k.id === id) ?? TICKET_KINDS[TICKET_KINDS.length - 1];
+
+/**
+ * Ticket files travel in pieces because Vercel rejects any single request or response
+ * over 4.5 MB. Each piece is at most TICKET_CHUNK bytes, in both directions.
+ */
+export const TICKET_CHUNK = 2 * 1024 * 1024;
+export const MAX_TICKET_BYTES = 20 * 1024 * 1024;
+export const ticketParts = (size: number) => Math.max(1, Math.ceil(size / TICKET_CHUNK));

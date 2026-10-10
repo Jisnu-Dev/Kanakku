@@ -89,6 +89,8 @@ export interface ActivityEntry {
 /** A travel ticket file (PDF or photo). The file itself is fetched separately. */
 export interface Ticket {
   id: string;
+  kind: string; // bus, train, flight, entry, stay, other
+  title: string; // place or event, for tickets that aren't a journey ("Wonderla")
   fromPlace: string;
   toPlace: string;
   departsOn: string | null; // YYYY-MM-DD

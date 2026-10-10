@@ -127,6 +127,23 @@ dialog.sheet::backdrop {
     max-height: 88dvh;
   }
 }
+/* The ticket viewer takes the whole screen. */
+dialog.viewer {
+  width: 100vw;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--sunk);
+  color: var(--ink);
+  overflow: hidden;
+}
+dialog.viewer[open] {
+  display: flex;
+  flex-direction: column;
+}
 @keyframes sheet-up {
   from { transform: translateY(24px); opacity: 0; }
 }
