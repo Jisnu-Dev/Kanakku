@@ -17,6 +17,7 @@
     "@vercel/functions": "^3.9.11",
     "nanoid": "^6.0.2",
     "next": "^16.4.0",
+    "pdfjs-dist": "6.4.299",
     "pg": "^8.23.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
