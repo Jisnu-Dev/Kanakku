@@ -92,3 +92,47 @@ export function simplifyDebts(balances: Pick<PersonBalance, "participantId" | "n
 export function totalSpent(state: TripState): number {
   return state.expenses.filter((e) => !e.deletedAt).reduce((a, e) => a + e.amount, 0);
 }
+
+export interface LedgerLine {
+  key: string;
+  kind: "expense" | "kitty" | "kittyHeld" | "paidBack" | "received";
+  expenseId?: string;
+  date: string | null;
+  label: string;
+  detail: string;
+  effect: number; // > 0 moves them towards being owed, < 0 towards owing
+}
+
+/**
+ * Every ledger entry that makes up one person's balance, in date order.
+ * The effects always add up to exactly their net balance, so this is the full "why".
+ */
+export function explainBalance(state: TripState, personId: string, nameOf: (id: string) => string, money: (paise: number) => string): LedgerLine[] {
+  const lines: LedgerLine[] = [];
+  for (const e of state.expenses) {
+    if (e.deletedAt) continue;
+    const paid = e.fromKitty ? 0 : (e.payers.find((p) => p.participantId === personId)?.amount ?? 0);
+    const share = e.splits.find((s) => s.participantId === personId)?.amount ?? 0;
+    if (paid === 0 && share === 0) continue;
+    const others = e.payers.filter((p) => p.participantId !== personId).map((p) => nameOf(p.participantId));
+    const payer = e.fromKitty ? "the kitty" : others.length ? others.join(" and ") : "";
+    const detail =
+      paid > 0 && share > 0 ? `Paid ${money(paid)}, own share ${money(share)}`
+      : paid > 0 ? `Paid ${money(paid)}, not part of the split`
+      : `Share ${money(share)}, paid by ${payer}`;
+    lines.push({ key: e.id, kind: "expense", expenseId: e.id, date: e.spentOn, label: e.title, detail, effect: paid - share });
+  }
+  for (const k of state.kitty)
+    if (!k.deletedAt && k.participantId === personId)
+      lines.push({ key: k.id, kind: "kitty", date: k.paidOn, label: "Put money into the kitty", detail: "Counts as money paid for the group", effect: k.amount });
+  for (const s of state.settlements) {
+    if (s.deletedAt) continue;
+    if (s.fromId === personId) lines.push({ key: s.id, kind: "paidBack", date: s.paidOn, label: `Paid ${nameOf(s.toId)} back`, detail: "Payment already recorded", effect: s.amount });
+    if (s.toId === personId) lines.push({ key: s.id, kind: "received", date: s.paidOn, label: `Received from ${nameOf(s.fromId)}`, detail: "Payment already recorded", effect: -s.amount });
+  }
+  lines.sort((a, b) => (a.date ?? "").localeCompare(b.date ?? ""));
+  const kitty = kittySummary(state);
+  if (kitty.holderId === personId && kitty.remaining !== 0)
+    lines.push({ key: "kitty-held", kind: "kittyHeld", date: null, label: "Kitty cash still with them", detail: "They hold what is left in the kitty", effect: -kitty.remaining });
+  return lines;
+}
