@@ -53,6 +53,9 @@ describe("matching people", () => {
     expect(matchPeople(["alex"], people)).toEqual([]); // "Al" is too short to guess from
     expect(matchPeople(["arunika"], [{ id: "6", name: "Arun" }])).toEqual([]); // different people
     expect(matchPeople(["arun"], people)).toEqual(["6"]);
+    expect(matchPeople(["akilesh"], [{ id: "9", name: "Akhilesh" }])).toEqual(["9"]); // one letter out
+    expect(matchPeople(["ashwin vignesh"], [{ id: "8", name: "Ashwin vignesh" }])).toEqual(["8"]);
+    expect(matchPeople(["dharneesh"], [{ id: "7", name: "Dheeksha" }])).toEqual([]);
   });
   it("pulls names out of a file name", () => {
     expect(namesFromFilename("arunika-alex-sai-dheeksha-jaii-jisnu-TVB326227448.pdf")).toEqual(["arunika", "alex", "sai", "dheeksha", "jaii", "jisnu"]);
