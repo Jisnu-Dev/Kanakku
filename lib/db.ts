@@ -1,3 +1,4 @@
+import { attachDatabasePool } from "@vercel/functions";
 import { Pool, types, type PoolClient } from "pg";
 
 // Return DATE columns as plain "YYYY-MM-DD" strings so timezones can't shift them.
@@ -111,22 +112,47 @@ function pool(): Pool {
   if (!g.__pool) {
     const url = process.env.DATABASE_URL;
     if (!url) throw new Error("DATABASE_URL is not set. Add your Neon connection string to .env.local (or to the Vercel project).");
-    g.__pool = new Pool({ connectionString: url, max: 5, idleTimeoutMillis: 10_000 });
+    g.__pool = new Pool({
+      connectionString: url,
+      max: 5,
+      idleTimeoutMillis: 5_000,
+      // Fail with an error instead of hanging if the database can't be reached or a query gets stuck.
+      connectionTimeoutMillis: 10_000,
+      query_timeout: 15_000,
+    });
+    // A dropped idle connection must not crash the server; the pool replaces it on the next query.
+    g.__pool.on("error", (e) => console.error("database connection dropped:", e.message));
+    // Lets Vercel close idle connections before it suspends the function.
+    attachDatabasePool(g.__pool);
   }
   return g.__pool;
 }
 
-/** Creates the tables the first time the app talks to a fresh database, so there is no migration step. */
+/**
+ * Creates the tables the first time the app talks to a fresh database, so there is no migration step.
+ *
+ * Everything here runs inside ONE transaction. Neon's pooled connection string goes through
+ * PgBouncer in transaction mode, where separate statements can land on different database
+ * sessions, so session-level state (such as pg_advisory_lock) must never be used.
+ */
 async function ready(): Promise<Pool> {
   const p = pool();
   if (!g.__schema) {
     g.__schema = (async () => {
+      // Normal case: the tables already exist, so there is nothing to lock or create.
+      const done = await p.query("select to_regclass('public.activity_trip') is not null as ok");
+      if (done.rows[0]?.ok) return;
       const c = await p.connect();
       try {
-        // Serialise concurrent cold starts so two of them don't race on CREATE TABLE.
-        await c.query("select pg_advisory_lock(7411001)");
+        await c.query("begin");
+        await c.query("set local lock_timeout = '8s'");
+        // Transaction-scoped lock: released automatically at commit or rollback.
+        await c.query("select pg_advisory_xact_lock(7411002)");
         await c.query(SCHEMA);
-        await c.query("select pg_advisory_unlock(7411001)");
+        await c.query("commit");
+      } catch (e) {
+        await c.query("rollback").catch(() => {});
+        throw e;
       } finally {
         c.release();
       }
