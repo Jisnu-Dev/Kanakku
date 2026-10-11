@@ -128,6 +128,18 @@ create index if not exists tickets_trip on tickets(trip_id);
 alter table tickets add column if not exists kind text not null default 'bus';
 alter table tickets add column if not exists title text not null default '';
 alter table tickets add column if not exists complete boolean not null default true;
+create table if not exists checklist_items (
+  id text primary key,
+  trip_id text not null references trips(id) on delete cascade,
+  label text not null,
+  mode text not null default 'each',
+  assignee_id text,
+  done_by jsonb not null default '[]',
+  created_by text,
+  created_at timestamptz not null default now(),
+  deleted_at timestamptz
+);
+create index if not exists checklist_trip on checklist_items(trip_id);
 create table if not exists ticket_chunks (
   ticket_id text not null references tickets(id) on delete cascade,
   seq integer not null,
@@ -171,7 +183,7 @@ async function ready(): Promise<Pool> {
     g.__schema = (async () => {
       // Normal case: the tables already exist, so there is nothing to lock or create.
       // This checks the newest object in SCHEMA; update it whenever something is added there.
-      const done = await p.query("select to_regclass('public.ticket_chunks') is not null as ok");
+      const done = await p.query("select to_regclass('public.checklist_trip') is not null as ok");
       if (done.rows[0]?.ok) return;
       const c = await p.connect();
       try {

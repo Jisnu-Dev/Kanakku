@@ -10,7 +10,7 @@ import { Expenses } from "./Expenses";
 import { Balances } from "./Balances";
 import { Insights } from "./Insights";
 import { Group } from "./Group";
-import { Tickets } from "./Tickets";
+import { Plan } from "./Plan";
 import { ExpenseForm } from "./ExpenseForm";
 import { ExpenseDetail } from "./ExpenseDetail";
 import { KittyForm, SettleForm, type SettlePrefill } from "./MoneyForms";
@@ -47,7 +47,7 @@ const TABS: { id: Tab; label: string; icon: string }[] = [
   { id: "expenses", label: "Expenses", icon: "list" },
   { id: "balances", label: "Balances", icon: "scale" },
   { id: "insights", label: "Spending", icon: "chart" },
-  { id: "tickets", label: "Tickets", icon: "ticket" },
+  { id: "tickets", label: "Plan", icon: "plan" },
   { id: "group", label: "Group", icon: "people" },
 ];
 
@@ -71,7 +71,8 @@ export function TripApp({ id }: { id: string }) {
 
   useEffect(() => {
     const fromHash = () => {
-      const h = location.hash.slice(1) as Tab;
+      const raw = location.hash.slice(1);
+      const h = (raw === "checklist" ? "tickets" : raw) as Tab;
       if (TABS.some((t) => t.id === h)) setTab(h);
     };
     fromHash();
@@ -80,7 +81,7 @@ export function TripApp({ id }: { id: string }) {
   }, []);
   const go = useCallback((t: Tab) => {
     setTab(t);
-    history.replaceState(null, "", t === "home" ? location.pathname : `#${t}`);
+    if (!(t === "tickets" && location.hash === "#checklist")) history.replaceState(null, "", t === "home" ? location.pathname : `#${t}`);
     window.scrollTo({ top: 0 });
   }, []);
 
@@ -118,7 +119,7 @@ export function TripApp({ id }: { id: string }) {
   if (!app) return status === "error" ? <Notice title="Couldn't load the trip" body="Check your connection and reload the page." /> : <Loading />;
 
   const needsIdentity = !app.me || choosing;
-  const View = { home: Home, expenses: Expenses, balances: Balances, insights: Insights, tickets: Tickets, group: Group }[tab];
+  const View = { home: Home, expenses: Expenses, balances: Balances, insights: Insights, tickets: Plan, group: Group }[tab];
 
   return (
     <Ctx.Provider value={app}>

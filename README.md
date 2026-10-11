@@ -50,6 +50,9 @@ npm test                     # split and balance maths
   are read from the ticket's own text in the browser (`lib/ticketParse.ts`, written against
   redBus e-tickets). `public/pdf.worker.min.mjs` is a copy of
   `node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs`; copy it again if you upgrade pdfjs-dist.
+- **Checklist** (Plan tab, next to Tickets): things to bring. An item is either packed by
+  everyone, each person ticking their own, or one for the group with a person bringing it.
+  The Trip page shows what you still have left (`lib/checklist.ts`).
 - **Receipts** are shrunk in the browser (about 150 KB each) and stored in Postgres.
 - **Sync**: the page refetches every 6 seconds and on focus. Saves for one trip are
   serialised with a row lock, so simultaneous edits don't clash.

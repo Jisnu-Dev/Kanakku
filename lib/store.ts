@@ -6,7 +6,7 @@ import { query, transaction } from "./db";
 import { CATEGORY_IDS, categoryOf, MAX_TICKET_BYTES, modeLabel, splitLabel, TICKET_CHUNK, TICKET_KIND_IDS, ticketParts } from "./constants";
 import { formatMoney } from "./money";
 import { computeSplit, seedFrom, SplitError } from "./split";
-import type { ActivityEntry, Expense, KittyContribution, Line, Participant, Settlement, SplitInput, Ticket, Trip, TripState } from "./types";
+import type { ActivityEntry, ChecklistItem, Expense, KittyContribution, Line, Participant, Settlement, SplitInput, Ticket, Trip, TripState } from "./types";
 
 /** An error whose message is safe and useful to show to the person using the app. */
 export class UserError extends Error {
@@ -95,6 +95,10 @@ const actions = {
   "ticket.finish": z.object({ id: z.string() }),
   "ticket.update": ticketMeta.extend({ id: z.string() }),
   "ticket.delete": z.object({ id: z.string() }),
+  "check.add": z.object({ label: z.string().trim().min(1, "Type what to bring").max(80), mode: z.enum(["each", "shared"]), assigneeId: z.string().nullable().default(null) }),
+  "check.update": z.object({ id: z.string(), label: z.string().trim().min(1, "Type what to bring").max(80), mode: z.enum(["each", "shared"]), assigneeId: z.string().nullable().default(null) }),
+  "check.toggle": z.object({ id: z.string(), participantId: z.string(), done: z.boolean() }),
+  "check.delete": z.object({ id: z.string() }),
   "budget.set": z.object({ category: z.string(), amount: z.number().int().min(0).max(1_000_000_000) }), // category "total" sets the trip budget; 0 clears
 };
 export type ActionName = keyof typeof actions;
@@ -106,7 +110,7 @@ export async function tripExists(id: string): Promise<boolean> {
 }
 
 export async function getState(id: string): Promise<TripState | null> {
-  const [trips, participants, expenses, payers, splits, settlements, kitty, budgets, activity, tickets] = await Promise.all([
+  const [trips, participants, expenses, payers, splits, settlements, kitty, budgets, activity, tickets, checklist] = await Promise.all([
     query<any>("select * from trips where id = $1", [id]),
     query<any>("select * from participants where trip_id = $1 order by created_at, name", [id]),
     query<any>("select * from expenses where trip_id = $1 order by spent_on desc, created_at desc", [id]),
@@ -122,6 +126,7 @@ export async function getState(id: string): Promise<TripState | null> {
        from tickets where trip_id = $1 and deleted_at is null and complete order by departs_on nulls last, departs_at nulls last, created_at`,
       [id],
     ),
+    query<any>("select * from checklist_items where trip_id = $1 and deleted_at is null order by created_at, id", [id]),
   ]);
   if (!trips[0]) return null;
   const t = trips[0];
@@ -131,6 +136,7 @@ export async function getState(id: string): Promise<TripState | null> {
     return m;
   };
   const payerMap = group(payers), splitMap = group(splits);
+  const known = (pid: string | null) => !!pid && participants.some((x) => x.id === pid);
   const trip: Trip = { id: t.id, name: t.name, startDate: t.start_date, endDate: t.end_date, budgetTotal: t.budget_total, kittyHolderId: t.kitty_holder_id, createdAt: iso(t.created_at)! };
   return {
     trip,
@@ -155,6 +161,10 @@ export async function getState(id: string): Promise<TripState | null> {
       id: t.id, kind: t.kind, title: t.title, fromPlace: t.from_place, toPlace: t.to_place, departsOn: t.departs_on, departsAt: t.departs_at, operator: t.operator, reference: t.reference,
       passengerIds: (t.passenger_ids as string[]).filter((p) => participants.some((x) => x.id === p)), passengersText: t.passengers_text, note: t.note,
       filename: t.filename, mime: t.mime, size: t.size, uploadedBy: t.uploaded_by, createdAt: iso(t.created_at)!,
+    })),
+    checklist: checklist.map((c): ChecklistItem => ({
+      id: c.id, label: c.label, mode: c.mode === "shared" ? "shared" : "each", assigneeId: known(c.assignee_id) ? c.assignee_id : null,
+      doneBy: (c.done_by as string[]).filter(known), createdBy: c.created_by, createdAt: iso(c.created_at)!,
     })),
   };
 }
@@ -357,6 +367,7 @@ export async function applyAction(trip: string, action: string, actorId: string 
         if (rows.length === 1) throw new UserError("A trip needs at least one person");
         if (t.kitty_holder_id === data.id) await c.query("update trips set kitty_holder_id = null where id = $1", [trip]);
         await c.query("update tickets set passenger_ids = passenger_ids - $2::text where trip_id = $1", [trip, data.id]);
+        await c.query("update checklist_items set done_by = done_by - $2::text, assignee_id = nullif(assignee_id, $2) where trip_id = $1", [trip, data.id]);
         await c.query("delete from participants where id = $1", [data.id]);
         await say("participant", data.id, `Removed ${who(ctx, data.id)} from the trip`);
         break;
@@ -501,6 +512,41 @@ export async function applyAction(trip: string, action: string, actorId: string 
         await c.query("delete from ticket_chunks where ticket_id = $1", [data.id]);
         await c.query("update tickets set deleted_at = now(), data = ''::bytea where id = $1", [data.id]);
         await say("ticket", data.id, `Deleted the ${ticketName({ kind: old.kind, title: old.title, fromPlace: old.from_place, toPlace: old.to_place })}`);
+        break;
+      }
+      case "check.add": {
+        if (data.assigneeId) need(ctx, data.assigneeId);
+        const dup = (await c.query("select 1 from checklist_items where trip_id = $1 and deleted_at is null and lower(label) = lower($2)", [trip, data.label])).rows[0];
+        if (dup) throw new UserError(`“${data.label}” is already on the list`);
+        const id = randomUUID();
+        await c.query("insert into checklist_items (id, trip_id, label, mode, assignee_id, created_by) values ($1,$2,$3,$4,$5,$6)", [id, trip, data.label, data.mode, data.mode === "shared" ? data.assigneeId : null, ctx.actor]);
+        await say("checklist", id, `Added “${data.label}” to the checklist${data.mode === "shared" ? (data.assigneeId ? `, for ${who(ctx, data.assigneeId)} to bring` : ", one for the group") : ""}`);
+        break;
+      }
+      case "check.update": {
+        const old = await owned("checklist_items", data.id);
+        if (old.deleted_at) throw new UserError("That item was removed", 404);
+        if (data.assigneeId) need(ctx, data.assigneeId);
+        // Switching between "everyone" and "one for the group" changes what a tick means, so start the ticks again.
+        const doneBy = old.mode === data.mode ? old.done_by : [];
+        await c.query("update checklist_items set label=$2, mode=$3, assignee_id=$4, done_by=$5 where id=$1", [data.id, data.label, data.mode, data.mode === "shared" ? data.assigneeId : null, JSON.stringify(doneBy)]);
+        break;
+      }
+      case "check.toggle": {
+        // Ticks are frequent and small, so they aren't written to the history.
+        const item = await owned("checklist_items", data.id);
+        if (item.deleted_at) throw new UserError("That item was removed", 404);
+        need(ctx, data.participantId);
+        const rest = (item.done_by as string[]).filter((p) => p !== data.participantId);
+        const next = item.mode === "shared" ? (data.done ? [data.participantId] : []) : data.done ? [...rest, data.participantId] : rest;
+        await c.query("update checklist_items set done_by = $2 where id = $1", [data.id, JSON.stringify(next)]);
+        break;
+      }
+      case "check.delete": {
+        const old = await owned("checklist_items", data.id);
+        if (old.deleted_at) break;
+        await c.query("update checklist_items set deleted_at = now() where id = $1", [data.id]);
+        await say("checklist", data.id, `Removed “${old.label}” from the checklist`);
         break;
       }
       case "budget.set": {

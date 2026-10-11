@@ -1,6 +1,8 @@
 "use client";
 import { formatRange, timeAgo } from "@/lib/format";
 import { formatMoney } from "@/lib/money";
+import { progressFor, unclaimed } from "@/lib/checklist";
+import { openChecklistNext } from "./Plan";
 import { chooseIdentity, useApp } from "./TripApp";
 import { ExpenseRow } from "./ExpenseRow";
 import { Avatar, Button, Empty, Icon, KittyMark, madras, Meter, Money, Panel, Section } from "./ui";
@@ -15,6 +17,12 @@ export function Home() {
   const hasKitty = kitty.contributed > 0 || !!kitty.holderId;
   const colors = state.participants.map((p) => p.color);
   const range = formatRange(state.trip.startDate, state.trip.endDate);
+  const packing = progressFor(state.checklist, me);
+  const loose = unclaimed(state.checklist);
+  const openChecklist = () => {
+    openChecklistNext();
+    app.go("tickets");
+  };
 
   return (
     <main>
@@ -75,6 +83,27 @@ export function Home() {
                 );
               })}
             </Panel>
+          </Section>
+        )}
+
+        {state.checklist.length > 0 && (packing.left.length > 0 || loose.length > 0) && (
+          <Section title="Before you leave" action={<Button variant="ghost" size="sm" className="!px-0" onClick={openChecklist}>Open checklist</Button>}>
+            <button type="button" onClick={openChecklist} className="block w-full rounded-2xl bg-surface p-4 text-left active:bg-sunk">
+              {packing.left.length > 0 && (
+                <>
+                  <p className="mb-2.5">
+                    <span className="font-semibold">{packing.left.length} {packing.left.length === 1 ? "thing" : "things"} left to pack</span>
+                    <span className="text-muted">: {packing.left.slice(0, 3).map((i) => i.label).join(", ")}{packing.left.length > 3 ? ` and ${packing.left.length - 3} more` : ""}</span>
+                  </p>
+                  <Meter value={packing.done} max={packing.total} label="Your packing progress" />
+                </>
+              )}
+              {loose.length > 0 && (
+                <p className={packing.left.length > 0 ? "mt-3 text-[15px] text-minus" : "text-[15px] text-minus"}>
+                  Nobody is bringing {loose.slice(0, 3).map((i) => i.label).join(", ")}{loose.length > 3 ? ` or ${loose.length - 3} other things` : ""} yet.
+                </p>
+              )}
+            </button>
           </Section>
         )}
 

@@ -107,6 +107,18 @@ export interface Ticket {
   createdAt: string;
 }
 
+/** Something to remember before leaving. */
+export interface ChecklistItem {
+  id: string;
+  label: string;
+  /** "each": everyone packs their own and ticks for themselves. "shared": one for the whole group. */
+  mode: "each" | "shared";
+  assigneeId: string | null; // shared items only: who is bringing it
+  doneBy: string[]; // each: everyone who has packed it. shared: whoever ticked it off (empty = not done)
+  createdBy: string | null;
+  createdAt: string;
+}
+
 export interface Trip {
   id: string;
   name: string;
@@ -126,4 +138,5 @@ export interface TripState {
   budgets: Record<string, number>; // category -> paise
   activity: ActivityEntry[];
   tickets: Ticket[];
+  checklist: ChecklistItem[];
 }

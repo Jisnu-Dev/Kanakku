@@ -192,7 +192,7 @@ export function Tickets() {
   );
 
   return (
-    <main className="px-4 pt-6">
+    <main className="px-4 pt-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h1 className="display text-[32px] font-semibold leading-tight">Tickets</h1>
