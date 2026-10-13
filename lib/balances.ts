@@ -64,6 +64,31 @@ export function computeBalances(state: TripState): PersonBalance[] {
   return [...map.values()];
 }
 
+export interface PaidSummary {
+  /** Everything they handed over: expenses, kitty, and payments to others. */
+  total: number;
+  /** The non-zero pieces of `total`, in reading order. */
+  parts: { label: string; amount: number }[];
+  /** Payments other people made to them. */
+  received: number;
+  /** What they have put in once money they got back is taken off. */
+  putIn: number;
+}
+
+/**
+ * What a person has paid, counted the same way as their balance, so the two never disagree:
+ * net = putIn - share - kittyHeld.
+ */
+export function paidSummary(b: PersonBalance): PaidSummary {
+  const parts = [
+    { label: "on expenses", amount: b.paid },
+    { label: "into the kitty", amount: b.contributed },
+    { label: "paid back to others", amount: b.settledOut },
+  ].filter((x) => x.amount > 0);
+  const total = b.paid + b.contributed + b.settledOut;
+  return { total, parts, received: b.settledIn, putIn: total - b.settledIn };
+}
+
 /**
  * Reduce net balances to a short list of payments: repeatedly match the person who owes
  * the most with the person who is owed the most. Produces at most (people − 1) transfers.

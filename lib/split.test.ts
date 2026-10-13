@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { allocate, computeSplit, SplitError } from "./split";
-import { computeBalances, explainBalance, simplifyDebts } from "./balances";
+import { computeBalances, explainBalance, paidSummary, simplifyDebts } from "./balances";
 import { toPaise, formatMoney } from "./money";
 import type { Expense, TripState } from "./types";
 
@@ -153,6 +153,36 @@ describe("explainBalance", () => {
     expect(a.find((l) => l.kind === "kittyHeld")?.effect).toBe(-150000);
     expect(a.some((l) => l.detail.includes("not part of the split"))).toBe(true);
     expect(explainBalance(s, "c", (id) => id, String).some((l) => l.detail === "Share 450, paid by a and b")).toBe(true);
+  });
+});
+
+describe("paidSummary", () => {
+  it("counts payments made to others, matching the balance (Dheeksha's case)", () => {
+    // Paid 1000 for an expense, owes 3107.39 overall, has paid 1888.22 back: balance -219.17.
+    const s = state({
+      expenses: [exp({ amount: 310739, payers: [{ participantId: "a", amount: 100000 }, { participantId: "b", amount: 210739 }], splits: [{ participantId: "a", amount: 310739 }] })],
+      settlements: [{ id: "s", fromId: "a", toId: "b", amount: 188822, mode: "upi", note: "", paidOn: "", createdBy: null, createdAt: "", deletedAt: null }],
+    });
+    const a = computeBalances(s).find((b) => b.participantId === "a")!;
+    const sum = paidSummary(a);
+    expect(a.net).toBe(-21917);
+    expect(sum.total).toBe(288822);
+    expect(sum.parts).toEqual([{ label: "on expenses", amount: 100000 }, { label: "paid back to others", amount: 188822 }]);
+    const b = computeBalances(s).find((x) => x.participantId === "b")!;
+    expect(paidSummary(b)).toMatchObject({ total: 210739, received: 188822, putIn: 21917 });
+  });
+  it("putIn minus share minus kitty held is always the balance", () => {
+    const k = (p: string) => ({ id: "k" + p, participantId: p, amount: 50000, mode: "upi" as const, note: "", paidOn: "", createdAt: "", deletedAt: null });
+    const s = state({
+      trip: { id: "t", name: "T", startDate: null, endDate: null, budgetTotal: null, kittyHolderId: "c", createdAt: "" },
+      kitty: [k("a"), k("b")],
+      expenses: [
+        exp({ amount: 90000, fromKitty: true, payers: [], splits: ["a", "b", "c"].map((p) => ({ participantId: p, amount: 30000 })) }),
+        exp({ amount: 12000, payers: [{ participantId: "c", amount: 12000 }], splits: [{ participantId: "a", amount: 6000 }, { participantId: "b", amount: 6000 }] }),
+      ],
+      settlements: [{ id: "s", fromId: "a", toId: "c", amount: 2500, mode: "cash", note: "", paidOn: "", createdBy: null, createdAt: "", deletedAt: null }],
+    });
+    for (const b of computeBalances(s)) expect(paidSummary(b).putIn - b.share - b.kittyHeld).toBe(b.net);
   });
 });
 

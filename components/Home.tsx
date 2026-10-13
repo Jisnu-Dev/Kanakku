@@ -1,6 +1,7 @@
 "use client";
 import { formatRange, timeAgo } from "@/lib/format";
 import { formatMoney } from "@/lib/money";
+import { paidSummary, type PersonBalance } from "@/lib/balances";
 import { progressFor, unclaimed } from "@/lib/checklist";
 import { openChecklistNext } from "./Plan";
 import { chooseIdentity, useApp } from "./TripApp";
@@ -52,12 +53,7 @@ export function Home() {
               </p>
             </div>
           </div>
-          {mine && (
-            <p className="mt-4 text-sm text-white/75">
-              Your share so far is <span className="num font-semibold text-white">{formatMoney(mine.share)}</span>. You've paid{" "}
-              <span className="num font-semibold text-white">{formatMoney(mine.paid + mine.contributed)}</span>.
-            </p>
-          )}
+          {mine && <PaidLine b={mine} onMore={() => app.go("balances")} />}
         </div>
       </header>
 
@@ -166,5 +162,29 @@ export function Home() {
         )}
       </div>
     </main>
+  );
+}
+
+/**
+ * "Your share so far is ₹3,107.39. You've paid ₹2,888.22: ₹1,000 on expenses and ₹1,888.22 paid back to others."
+ * Built from the same numbers as the balance above it, so the two always agree.
+ */
+function PaidLine({ b, onMore }: { b: PersonBalance; onMore: () => void }) {
+  const sum = paidSummary(b);
+  const strong = (paise: number) => <span className="num font-semibold text-white">{formatMoney(paise)}</span>;
+  const pieces = sum.parts.map((p, i) => (
+    <span key={p.label}>
+      {i > 0 && (i === sum.parts.length - 1 ? " and " : ", ")}
+      {strong(p.amount)} {p.label}
+    </span>
+  ));
+  return (
+    <p className="mt-4 text-sm leading-relaxed text-white/75">
+      Your share so far is {strong(b.share)}.{" "}
+      {sum.total === 0 ? "You haven't paid anything yet." : sum.parts.length > 1 ? <>You've paid {strong(sum.total)}: {pieces}.</> : <>You've paid {pieces}.</>}
+      {sum.received > 0 && <> Others have paid you {strong(sum.received)}.</>}
+      {b.kittyHeld !== 0 && <> You're holding {strong(b.kittyHeld)} of kitty cash.</>}{" "}
+      <button type="button" onClick={onMore} className="font-semibold text-white underline underline-offset-2">See how</button>
+    </p>
   );
 }

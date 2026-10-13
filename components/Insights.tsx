@@ -1,5 +1,6 @@
 "use client";
 import { useMemo, useState } from "react";
+import { paidSummary } from "@/lib/balances";
 import { CATEGORIES, modeLabel, PAYMENT_MODES } from "@/lib/constants";
 import { formatDay } from "@/lib/format";
 import { formatMoney } from "@/lib/money";
@@ -47,7 +48,7 @@ export function Insights() {
   const tripTotal = tripDays.reduce((a, [, v]) => a + v, 0);
   const maxCat = Math.max(1, ...byCat.map((c) => Math.max(c.value, mine ? 0 : (state.budgets[c.id] ?? 0))));
   const maxDay = Math.max(1, ...byDay.map(([, v]) => v));
-  const maxPerson = Math.max(1, ...balances.map((b) => Math.max(b.share, b.paid + b.contributed)));
+  const maxPerson = Math.max(1, ...balances.map((b) => Math.max(b.share, paidSummary(b).putIn)));
 
   return (
     <main className="px-4 pt-6">
@@ -101,18 +102,18 @@ export function Insights() {
           </Section>
 
           {!mine && (
-            <Section title="Paid versus share">
-              <p className="-mt-1 mb-3 text-[15px] text-muted">What each person put in, against what their share comes to.</p>
+            <Section title="Put in versus share">
+              <p className="-mt-1 mb-3 text-[15px] text-muted">What each person has put in, counting money they paid back and got back, against their share. The gap between the two is their balance.</p>
               <Panel>
                 {balances.map((b) => {
                   const p = person(b.participantId)!;
-                  const put = b.paid + b.contributed;
+                  const put = paidSummary(b).putIn;
                   return (
                     <div key={b.participantId} className="px-4 py-3">
                       <div className="mb-2 flex items-center gap-2.5"><Avatar person={p} size={26} /><span className="font-medium">{p.name}</span></div>
-                      {[["Paid", put, "var(--indigo)"], ["Share", b.share, "var(--turmeric)"]].map(([label, v, color]) => (
+                      {[["Put in", put, "var(--indigo)"], ["Share", b.share, "var(--turmeric)"]].map(([label, v, color]) => (
                         <div key={label as string} className="mt-1 flex items-center gap-2.5 text-sm">
-                          <span className="w-11 text-muted">{label}</span>
+                          <span className="w-12 shrink-0 text-muted">{label}</span>
                           <span className="h-2 flex-1 overflow-hidden rounded-full bg-sunk"><span className="block h-full rounded-full" style={{ width: `${((v as number) / maxPerson) * 100}%`, background: color as string, minWidth: (v as number) > 0 ? 4 : 0 }} /></span>
                           <span className="num w-20 text-right font-medium">{formatMoney(v as number)}</span>
                         </div>
